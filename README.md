@@ -1,0 +1,11 @@
+
+# 一个Rust(争取)全框架管理Session库
+# A Rust (strive) full framework management session library
+
+
+
+
+#### 项目很简单，想要实现什么功能可以提issues或者直接提PR
+#### The project is very simple. If you want to implement any function, you can raise issues or directly raise PR
+#### プロジェクトは非常にシンプルです。機能を実装したい場合は、Issue を投稿するか、直接 PR を投稿してください。
+#### Proyeknya sangat sederhana. Jika Anda ingin menerapkan fungsi apa pun, Anda dapat mengajukan masalah atau langsung mengajukan PR
