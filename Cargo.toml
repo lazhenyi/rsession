@@ -2,6 +2,22 @@
 name = "rsession"
 version = "0.1.0"
 edition = "2024"
+authors = [
+    "<ZhenYi> <434836402@qq.com>"
+]
+description = "A simple session manager for Rust"
+repository = "https://github.com/lazhenyi/rsession"
+license = "MIT"
+keywords = [
+    "session",
+    "manager",
+    "cookie",
+    "web",
+]
+readme = "README.md"
+documentation = "https://docs.rs/rsession"
+categories = []
+publish = true
 
 [features]
 actix-web = []
