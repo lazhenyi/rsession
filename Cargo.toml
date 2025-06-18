@@ -1,0 +1,48 @@
+[package]
+name = "rsession"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+actix-web = []
+tower = []
+ntex = []
+rocket = []
+warp = []
+
+redis = []
+redis-cluster = []
+redis-sentinel = []
+
+[dependencies]
+time = { version = "0.3", features = ["local-offset"] }
+cookie = { version = "0.18.1", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = [] }
+
+actix-web = { version = "4", features = [] }
+tower = { version = "0.5.2", features = [] }
+http = { version = "1", features = [] }
+axum = { version = "0.8.4", features = [] }
+ntex = { version = "2", features = [] }
+rocket = { version = "0.5", features = [] }
+warp = { version = "0.3", features = [] }
+
+
+deadpool-redis = { version = "0.21.1", features = ["rt_tokio_1","rt_async-std_1","acl", "cluster","sentinel"] }
+
+uuid = { version = "1", features = ["v7","v4","serde"] }
+sha256 = { version = "1", features = [] }
+rand = { version = "0.9", features = ["std_rng"] }
+
+
+tokio = { version = "1.0.0", features = ["full"] }
+
+tracing-subscriber = { version = "0.3.19", features = [] }
+[[example]]
+name = "actix-web"
+path = "test/actix.rs"
+required-features = [
+    "actix-web",
+    "redis"
+]
