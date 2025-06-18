@@ -2,6 +2,8 @@
 # 一个Rust(争取)全框架管理Session库
 # A Rust (strive) full framework management session library
 
+[![crates.io](https://img.shields.io/crates/v/rsession.svg)](https://crates.io/crates/rsession)
+[![Released API docs](https://docs.rs/rsession/badge.svg)](https://docs.rs/rsession)
 
 
 
