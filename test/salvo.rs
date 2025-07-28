@@ -1,7 +1,7 @@
-use salvo::prelude::*;
-use rsession::framework::salvo::{SalvoSessionMiddleware, SessionDepotExt};
 use rsession::RandKey;
+use rsession::framework::salvo::{SalvoSessionMiddleware, SessionDepotExt};
 use rsession::redis::RedisSessionStorage;
+use salvo::prelude::*;
 
 #[tokio::main]
 async fn main() {
@@ -19,7 +19,6 @@ async fn main() {
         .get(index);
     Server::new(acceptor).serve(router).await;
 }
-
 
 #[handler]
 async fn index(_req: &mut Request, depot: &mut Depot, res: &mut Response, _ctrl: &mut FlowCtrl) {

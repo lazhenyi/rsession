@@ -1,21 +1,30 @@
-use std::cell::RefCell;
+//! Axum session management middleware
+//!
+//! This module provides Axum integration for session management using Tower middleware,
+//! handling session creation, storage operations, and cookie management.
 use crate::{Session, SessionBuilder, SessionInner, SessionStatus, SessionStore};
-use axum::body::{Body};
-use axum::http::header::COOKIE;
+use axum::body::Body;
 use axum::http::HeaderMap;
-use axum::{
-    extract::Request,
-    response::Response,
-};
+use axum::http::header::COOKIE;
+use axum::{extract::Request, response::Response};
 use cookie::{Cookie, CookieJar};
 use futures::future::BoxFuture;
 use http::header::SET_COOKIE;
+use std::cell::RefCell;
 use std::convert::Infallible;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
 
+/// Axum session management middleware
+///
+/// This Tower Service implementation integrates session management into Axum applications,
+/// handling session loading from storage, request processing, and response finalization.
+///
+/// # Type Parameters
+/// * `S` - The inner service type
+/// * `Storage` - The session storage backend implementing SessionStore
 #[derive(Clone)]
 pub struct AxumSessionMiddleware<S, Storage>
 where
@@ -28,13 +37,14 @@ where
     store: Arc<Storage>,
 }
 
+/// Tower Service implementation for Axum session middleware
+///
+/// Processes incoming requests to load or create sessions, injects the session into
+/// request extensions, and handles responses to persist session changes and update cookies.
 impl<S, Storage> Service<Request<Body>> for AxumSessionMiddleware<S, Storage>
 where
     Storage: SessionStore + 'static + Send + Sync + Clone,
-    S: Service<Request<Body>, Response = Response, Error = Infallible>
-    + Clone
-    + Send
-    + 'static,
+    S: Service<Request<Body>, Response = Response, Error = Infallible> + Clone + Send + 'static,
     S::Future: Send + 'static,
 {
     type Response = Response;
@@ -77,14 +87,20 @@ where
                     match inner.status {
                         SessionStatus::UnChange => {
                             if builder.auto_expire {
-                                store.expire(&inner.id.to_string(), builder.expire_time).await.ok();
+                                store
+                                    .expire(&inner.id.to_string(), builder.expire_time)
+                                    .await
+                                    .ok();
                             }
                             store.set(&inner.id.to_string(), inner.clone()).await.ok();
                         }
                         SessionStatus::Change => {
                             store.remove(&inner.id.to_string()).await.ok();
                             store.set(&inner.id.to_string(), inner.clone()).await.ok();
-                            store.expire(&inner.id.to_string(), builder.expire_time).await.ok();
+                            store
+                                .expire(&inner.id.to_string(), builder.expire_time)
+                                .await
+                                .ok();
                         }
                         SessionStatus::Clear => {
                             store.remove(&inner.id.to_string()).await.ok();
@@ -93,18 +109,27 @@ where
                             store.remove(&inner.id.to_string()).await.ok();
                         }
                         SessionStatus::Expire => {
-                            store.expire(&inner.id.to_string(), builder.expire_time).await.ok();
+                            store
+                                .expire(&inner.id.to_string(), builder.expire_time)
+                                .await
+                                .ok();
                         }
                     }
                     Ok(res)
                 }
-                Err(err) => {
-                    Err(err)
-                }
+                Err(err) => Err(err),
             }
         })
     }
 }
+
+/// Tower Layer for Axum session middleware
+///
+/// Provides a configuration layer for adding session management to Axum applications
+/// through the Tower middleware system.
+///
+/// # Type Parameters
+/// * `Storage` - The session storage backend implementing SessionStore
 #[derive(Clone)]
 pub struct AxumSessionMiddlewareLayer<Storage>
 where
@@ -114,10 +139,15 @@ where
     store: Arc<Storage>,
 }
 
-impl <Storage>AxumSessionMiddlewareLayer<Storage>
+impl<Storage> AxumSessionMiddlewareLayer<Storage>
 where
     Storage: SessionStore + 'static,
 {
+    /// Creates a new AxumSessionMiddlewareLayer
+    ///
+    /// # Arguments
+    /// * `builder` - Session configuration builder with cookie/session settings
+    /// * `store` - Session storage backend implementation
     pub fn new(builder: SessionBuilder, store: Storage) -> Self {
         Self {
             builder: Arc::new(builder),
@@ -126,10 +156,17 @@ where
     }
 }
 
-impl<S,Storage> Layer<S> for AxumSessionMiddlewareLayer<Storage>
+/// Tower Layer implementation for Axum session middleware
+///
+/// Applies the session middleware to an Axum service, enabling session management
+/// for all routes wrapped by this layer.
+impl<S, Storage> Layer<S> for AxumSessionMiddlewareLayer<Storage>
 where
     Storage: SessionStore + 'static,
-    S: Service<Request, Response = Response, Error = Infallible> + Send + 'static + std::marker::Sync,
+    S: Service<Request, Response = Response, Error = Infallible>
+        + Send
+        + 'static
+        + std::marker::Sync,
     S::Future: Send + 'static,
 {
     type Service = AxumSessionMiddleware<S, Storage>;
@@ -143,6 +180,13 @@ where
     }
 }
 
+/// Parses cookies from request headers into a CookieJar
+///
+/// # Arguments
+/// * `headers` - Request headers containing cookie information
+///
+/// # Returns
+/// A CookieJar populated with cookies from the request
 pub(crate) fn get_cookies(headers: &HeaderMap) -> CookieJar {
     let mut jar = CookieJar::new();
     let cookie_iter = headers
@@ -157,10 +201,13 @@ pub(crate) fn get_cookies(headers: &HeaderMap) -> CookieJar {
     jar
 }
 
-impl <S>axum::extract::FromRequest<S> for Session {
+impl<S> axum::extract::FromRequest<S> for Session {
     type Rejection = (axum::http::status::StatusCode, &'static str);
 
-    fn from_request(req: Request, _: &S) -> impl Future<Output=Result<Self, Self::Rejection>> + Send {
+    fn from_request(
+        req: Request,
+        _: &S,
+    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
         async move {
             let inner = req.extensions().get::<Session>();
             if let Some(inner) = inner {

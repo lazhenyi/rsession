@@ -1,9 +1,9 @@
 mod axum;
 
 use actix_web::{App, HttpServer};
+use rsession::framework::actix::ActixSessionMiddleware;
 use rsession::redis::RedisSessionStorage;
 use rsession::{RandKey, Session};
-use rsession::framework::actix::ActixSessionMiddleware;
 
 #[tokio::main]
 async fn main() {
@@ -16,18 +16,15 @@ async fn main() {
         let mut store = RedisSessionStorage::new(redis, RandKey::UuidV7);
         store.set_prefix("actix_session:");
         App::new()
-            .wrap(
-                ActixSessionMiddleware::new(
-                    session.clone(),
-                    store.clone()
-                )
-            )
+            .wrap(ActixSessionMiddleware::new(session.clone(), store.clone()))
             .route("/", actix_web::web::get().to(index))
     })
-        .bind("127.0.0.1:8080").unwrap()
-        .run().await.unwrap();
+    .bind("127.0.0.1:8080")
+    .unwrap()
+    .run()
+    .await
+    .unwrap();
 }
-
 
 async fn index(session: Session) -> String {
     return if session.get::<i32>("count").is_err() {
@@ -37,5 +34,5 @@ async fn index(session: Session) -> String {
         let count = session.get::<i32>("count").unwrap();
         session.set("count", count + 1).ok();
         format!("count: {:?}", session.get::<i32>("count").unwrap())
-    }
+    };
 }
