@@ -1,7 +1,7 @@
 use crate::{Session, SessionBuilder, SessionInner, SessionStatus, SessionStore};
 use actix_web::body::MessageBody;
 use actix_web::dev::{forward_ready, Payload, Service, ServiceRequest, ServiceResponse, Transform};
-use actix_web::http::header::{HeaderValue, SET_COOKIE};
+use actix_web::http::header::SET_COOKIE;
 use actix_web::{FromRequest, HttpMessage, HttpRequest};
 use std::cell::RefCell;
 use std::future::{ready, Ready};
@@ -82,12 +82,8 @@ where
             let session_key = req.cookie(&builder.key)
                 .map(|x|x.value().to_string());
             if let Some(session_key) = session_key {
-                if let Ok(session) = store.get(&session_key).await {
-                    let inner = SessionInner{
-                        session_id: session_key,
-                        status: SessionStatus::UnChange,
-                        data: session,
-                    };
+                if let Ok(inner) = store.get(&session_key).await {
+                    store.remove(&session_key).await.ok();
                     req.extensions_mut().insert(Rc::new(RefCell::new(inner)));
                 } else {
                     req.extensions_mut().insert(Rc::new(RefCell::new(SessionInner::new(session_key))));
@@ -102,26 +98,29 @@ where
                 match inner.status {
                     SessionStatus::UnChange => {
                         if builder.auto_expire {
-                            store.expire(&inner.session_id, builder.expire_time).await.ok();
+                            store.expire(&inner.id.to_string(), builder.expire_time).await.ok();
                         }
+                        store.set(&inner.id.to_string(), inner.clone()).await.ok();
                     }
                     SessionStatus::Change => {
-                        store.remove(&inner.session_id).await.ok();
-                        store.set(&inner.session_id, inner.data.clone()).await.ok();
-                        store.expire(&inner.session_id, builder.expire_time).await.ok();
+                        store.remove(&inner.id.to_string()).await.ok();
+                        store.set(&inner.id.to_string(), inner.clone()).await.ok();
+                        store.expire(&inner.id.to_string(), builder.expire_time).await.ok();
                     }
                     SessionStatus::Clear => {
-                        store.remove(&inner.session_id).await.ok();
+                        store.remove(&inner.id.to_string()).await.ok();
                     }
                     SessionStatus::Destroy => {
-                        store.remove(&inner.session_id).await.ok();
+                        store.remove(&inner.id.to_string()).await.ok();
                     }
                     SessionStatus::Expire => {
-                        store.expire(&inner.session_id, builder.expire_time).await.ok();
+                        store.expire(&inner.id.to_string(), builder.expire_time).await.ok();
                     }
                 }
-                let cookie = inner.builder(&builder);
-                res.headers_mut().insert(SET_COOKIE, HeaderValue::from_str(&cookie.to_string()).unwrap());
+                let cookie = builder.build(inner.id.clone());;
+                if let Ok(cookie) = cookie.to_string().parse() {
+                    res.headers_mut().insert(SET_COOKIE, cookie);
+                }
             }
             Ok(res)
             

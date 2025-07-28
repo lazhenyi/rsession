@@ -1,146 +1,193 @@
-use crate::{SessionBuilder, SessionInner, SessionStatus, SessionStore};
+use std::cell::RefCell;
+use crate::{Session, SessionBuilder, SessionInner, SessionStatus, SessionStore};
+use axum::body::{Body};
+use axum::http::header::COOKIE;
+use axum::http::HeaderMap;
 use axum::{
     extract::Request,
-    http::header::{HeaderValue, SET_COOKIE}
-    ,
     response::Response,
 };
-use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
+use cookie::{Cookie, CookieJar};
+use futures::future::BoxFuture;
+use http::header::SET_COOKIE;
+use std::convert::Infallible;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
 
-pub struct SessionMiddleware<S, Storage>
+#[derive(Clone)]
+pub struct AxumSessionMiddleware<S, Storage>
 where
-    S: Service<Request, Response = Response, Error = axum::http::Error> + Send + 'static,
+    S: Service<Request<Body>, Response = Response, Error = Infallible> + Send + 'static,
     S::Future: Send + 'static,
-    Storage: SessionStore + 'static,
+    Storage: SessionStore + 'static + Send + Sync + Clone,
 {
-    inner: Mutex<S>,
+    inner: S,
     builder: Arc<SessionBuilder>,
-    store: Rc<Arc<Storage>>,
+    store: Arc<Storage>,
 }
 
-impl<S,Storage> Service<Request> for SessionMiddleware<S,Storage>
+impl<S, Storage> Service<Request<Body>> for AxumSessionMiddleware<S, Storage>
 where
-    Storage: SessionStore + 'static,
-    S: Service<Request, Response = Response, Error = axum::http::Error> + Send + 'static + std::marker::Sync,
+    Storage: SessionStore + 'static + Send + Sync + Clone,
+    S: Service<Request<Body>, Response = Response, Error = Infallible>
+    + Clone
+    + Send
+    + 'static,
     S::Future: Send + 'static,
 {
     type Response = Response;
-    type Error = http::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Error = Infallible;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.lock()
-            .unwrap()
-            .poll_ready(cx)
+        self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, mut req: Request) -> Self::Future {
+    fn call(&mut self, mut req: Request<Body>) -> Self::Future {
         let store = self.store.clone();
+        let not_ready_inner = self.inner.clone();
+        let mut ready_inner = std::mem::replace(&mut self.inner, not_ready_inner);
         let builder = self.builder.clone();
-        let session_key = req.headers()
-            .get("Cookie")
-            .and_then(|h| h.to_str().ok())
-            .and_then(|s| s.split(';').find(|c| c.contains(&builder.key)))
-            .map(|s| s.to_string());
-        let mut inner = self.inner.lock().unwrap();
         Box::pin(async move {
-            let session_inner = match session_key {
-                Some(id) => {
-                    if let Ok(data) = store.get(&id).await {
-                        SessionInner {
-                            session_id: id,
-                            status: SessionStatus::UnChange,
-                            data,
-                        }
-                    } else {
-                        SessionInner {
-                            session_id: id,
-                            status: SessionStatus::UnChange,
-                            data: HashMap::new(),
-                        }
-                    }
-                },
-                None => {
-                    let new_id = builder.rand_key.generate();
-                    SessionInner {
-                        session_id: new_id,
-                        status: SessionStatus::Change,
-                        data: HashMap::new(),
-                    }
+            let cookies = get_cookies(req.headers());
+            let session_key = cookies.get(&builder.key);
+            let session_inner = if let Some(session_key) = session_key {
+                let session_key = session_key.value().to_string();
+                if let Ok(inner) = store.get(&session_key).await {
+                    inner
+                } else {
+                    SessionInner::new(builder.rand_key.generate())
                 }
+            } else {
+                SessionInner::new(builder.rand_key.generate())
             };
-
-            req.extensions_mut().insert(Arc::new(Mutex::new(session_inner)));
-            let inner_service = inner.call(req);
-            let mut res = inner_service.await?;
-
-            if let Some(inner_arc) = res.extensions().get::<Arc<Mutex<SessionInner>>>() {
-                let inner = inner_arc.lock().unwrap();
-                match inner.status {
-                    SessionStatus::UnChange => {
-                        if builder.auto_expire {
-                            store.expire(&inner.session_id, builder.expire_time).await.ok();
+            let session = Session::new(Rc::new(RefCell::new(session_inner)));
+            req.extensions_mut().insert(session.clone());
+            let future = ready_inner.call(req);
+            let res = future.await;
+            match res {
+                Ok(mut res) => {
+                    let inner = session.inner();
+                    let cookie = builder.build(inner.id.clone());
+                    if let Ok(cookie) = cookie.to_string().parse() {
+                        res.headers_mut().insert(SET_COOKIE, cookie);
+                    }
+                    match inner.status {
+                        SessionStatus::UnChange => {
+                            if builder.auto_expire {
+                                store.expire(&inner.id.to_string(), builder.expire_time).await.ok();
+                            }
+                            store.set(&inner.id.to_string(), inner.clone()).await.ok();
+                        }
+                        SessionStatus::Change => {
+                            store.remove(&inner.id.to_string()).await.ok();
+                            store.set(&inner.id.to_string(), inner.clone()).await.ok();
+                            store.expire(&inner.id.to_string(), builder.expire_time).await.ok();
+                        }
+                        SessionStatus::Clear => {
+                            store.remove(&inner.id.to_string()).await.ok();
+                        }
+                        SessionStatus::Destroy => {
+                            store.remove(&inner.id.to_string()).await.ok();
+                        }
+                        SessionStatus::Expire => {
+                            store.expire(&inner.id.to_string(), builder.expire_time).await.ok();
                         }
                     }
-                    SessionStatus::Change => {
-                        store.set(&inner.session_id, inner.data.clone()).await.ok();
-                        store.expire(&inner.session_id, builder.expire_time).await.ok();
-                    }
-                    SessionStatus::Clear | SessionStatus::Destroy => {
-                        store.remove(&inner.session_id).await.ok();
-                    }
-                    SessionStatus::Expire => {
-                        store.expire(&inner.session_id, builder.expire_time).await.ok();
-                    }
+                    Ok(res)
                 }
-
-                let cookie_value = format!("{}={}; Path=/", builder.key, inner.session_id);
-                res.headers_mut().insert(SET_COOKIE, HeaderValue::from_str(&cookie_value).unwrap());
+                Err(err) => {
+                    Err(err)
+                }
             }
-            Ok(res)
         })
     }
 }
-
-pub struct SessionMiddlewareLayer<Storage>
+#[derive(Clone)]
+pub struct AxumSessionMiddlewareLayer<Storage>
 where
     Storage: SessionStore + 'static,
 {
     builder: Arc<SessionBuilder>,
-    store: Rc<Arc<Storage>>,
+    store: Arc<Storage>,
 }
 
-impl <Storage>SessionMiddlewareLayer<Storage>
+impl <Storage>AxumSessionMiddlewareLayer<Storage>
 where
     Storage: SessionStore + 'static,
 {
     pub fn new(builder: SessionBuilder, store: Storage) -> Self {
         Self {
             builder: Arc::new(builder),
-            store: Rc::new(Arc::new(store)),
+            store: Arc::new(store),
         }
     }
 }
 
-impl<S,Storage> Layer<S> for SessionMiddlewareLayer<Storage>
+impl<S,Storage> Layer<S> for AxumSessionMiddlewareLayer<Storage>
 where
     Storage: SessionStore + 'static,
-    S: Service<Request, Response = Response, Error = axum::http::Error> + Send + 'static + std::marker::Sync,
+    S: Service<Request, Response = Response, Error = Infallible> + Send + 'static + std::marker::Sync,
     S::Future: Send + 'static,
 {
-    type Service = SessionMiddleware<S, Storage>;
+    type Service = AxumSessionMiddleware<S, Storage>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        SessionMiddleware {
+        AxumSessionMiddleware {
             inner,
             builder: self.builder.clone(),
             store: self.store.clone(),
         }
     }
 }
+
+pub(crate) fn get_cookies(headers: &HeaderMap) -> CookieJar {
+    let mut jar = CookieJar::new();
+    let cookie_iter = headers
+        .get_all(COOKIE)
+        .into_iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(';'))
+        .filter_map(|cookie| Cookie::parse(cookie.to_owned()).ok());
+    for cookie in cookie_iter {
+        jar.add_original(cookie);
+    }
+    jar
+}
+
+impl <S>axum::extract::FromRequest<S> for Session {
+    type Rejection = (axum::http::status::StatusCode, &'static str);
+
+    fn from_request(req: Request, _: &S) -> impl Future<Output=Result<Self, Self::Rejection>> + Send {
+        async move {
+            let inner = req.extensions().get::<Session>();
+            if let Some(inner) = inner {
+                return Ok(inner.clone());
+            } else {
+                Err((
+                    axum::http::status::StatusCode::INTERNAL_SERVER_ERROR,
+                    "session not found",
+                ))
+            }
+        }
+    }
+}
+
+// impl<S> axum::extract::FromRequestParts<S> for Session {
+//     type Rejection = (axum::http::status::StatusCode, &'static str);
+//     fn from_request_parts(parts: &mut Parts, _: &S) -> impl Future<Output=Result<Self, Self::Rejection>> + Send {
+//         async move {
+//             let inner = parts.extensions.get::<SessionInner>();
+//             if let Some(inner) = inner {
+//                 Ok(Session::new(Rc::new(RefCell::new(inner.clone()))))
+//             } else {
+//                 Err((
+//                     axum::http::status::StatusCode::INTERNAL_SERVER_ERROR,
+//                     "session not found",
+//                 ))
+//             }
+//         }
+//     }
+// }
