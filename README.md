@@ -6,8 +6,6 @@
 [![Released API docs](https://docs.rs/rsession/badge.svg)](https://docs.rs/rsession)
 
 
-
-#### 项目很简单，想要实现什么功能可以提issues或者直接提PR
 #### The project is very simple. If you want to implement any function, you can raise issues or directly raise PR
 #### プロジェクトは非常にシンプルです。機能を実装したい場合は、Issue を投稿するか、直接 PR を投稿してください。
 #### Proyeknya sangat sederhana. Jika Anda ingin menerapkan fungsi apa pun, Anda dapat mengajukan masalah atau langsung mengajukan PR
