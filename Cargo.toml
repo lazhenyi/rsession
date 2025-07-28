@@ -1,12 +1,12 @@
 [package]
 name = "rsession"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 authors = [
     "<ZhenYi> <434836402@qq.com>"
 ]
 description = "A simple session manager for Rust"
-repository = "https://github.com/lazhenyi/rsession"
+repository = "https://github.com/GitDataAi/rsession"
 license = "MIT"
 keywords = [
     "session",
