@@ -1,8 +1,9 @@
-use std::rc::Rc;
-use cookie::SameSite;
+use cookie::{Cookie, Expiration, SameSite};
 use rand::Rng;
 use sha256::Sha256Digest;
-use time::Duration;
+use std::ops::Add;
+use std::rc::Rc;
+use time::{Duration, OffsetDateTime};
 
 #[derive(Debug,Clone)]
 pub enum RefreshStrategy {
@@ -16,6 +17,11 @@ pub enum RandKey {
     UuidV4,
     UuidV7,
     RandomSha256(usize),
+}
+impl Default for RandKey {
+    fn default() -> Self {
+        RandKey::RandomSha256(32)
+    }
 }
 
 impl RandKey {
@@ -44,19 +50,20 @@ impl RandKey {
 
 #[derive(Debug,Clone)]
 pub struct SessionBuilder {
-    pub(crate) key: String,
-    secret: Option<[u8;64]>,
-    pub(crate) expire_time: Duration,
-    pub(crate) path: String,
-    pub(crate) domain: String,
-    pub(crate) secure: bool,
-    pub(crate) http_only: bool,
-    pub(crate) max_age: Option<Duration>,
-    pub(crate) same_site: Option<SameSite>,
-    refresh_strategy: RefreshStrategy,
-    pub(crate) rand_key: Rc<RandKey>,
-    pub(crate) auto_expire: bool,
+    pub key: String,
+    pub secret: Option<[u8;64]>,
+    pub expire_time: Duration,
+    pub path: String,
+    pub domain: String,
+    pub secure: bool,
+    pub http_only: bool,
+    pub max_age: Option<Duration>,
+    pub same_site: Option<SameSite>,
+    pub refresh_strategy: RefreshStrategy,
+    pub rand_key: Rc<RandKey>,
+    pub auto_expire: bool,
 }
+
 
 unsafe impl Sync for SessionBuilder {}
 unsafe impl Send for SessionBuilder {}
@@ -139,5 +146,26 @@ impl SessionBuilder {
         }
         self.rand_key = Rc::from(rand_key);
         self
+    }
+
+    pub fn build(&self, id: String) -> Cookie {
+        let mut cookie = Cookie::new(self.key.clone(), id);
+        cookie.set_domain(self.domain.clone());
+        cookie.set_path(self.path.clone());
+        cookie.set_http_only(self.http_only);
+        cookie.set_secure(self.secure);
+        cookie.set_same_site(self.same_site);
+        match self.refresh_strategy {
+            RefreshStrategy::BrowserLifeCycle => {
+                cookie.unset_expires();
+            }
+            RefreshStrategy::PersistentStorage(duration) => {
+                cookie.set_expires(Expiration::DateTime(OffsetDateTime::now_utc().add(duration)));
+            }
+        }
+        if let Some(max_age) = self.max_age {
+            cookie.set_max_age(max_age);
+        }
+        cookie
     }
 }

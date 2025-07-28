@@ -1,11 +1,11 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
-use cookie::Cookie;
 use serde::de::DeserializeOwned;
-use crate::SessionBuilder;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::io;
+use uuid::Uuid;
+use crate::SessionStatus::Change;
 
-#[derive(Clone,Debug)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum SessionStatus {
     UnChange,
     Change,
@@ -13,97 +13,60 @@ pub enum SessionStatus {
     Destroy,
     Expire,
 }
-
-
-pub struct Session(Rc<RefCell<SessionInner>>);
-
-impl Session {
-    pub fn new(inner: Rc<RefCell<SessionInner>>) -> Self {
-        Self(inner)
+impl Default for SessionStatus {
+    fn default() -> Self {
+        SessionStatus::UnChange
     }
 }
 
-
-#[derive(Clone,Debug)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SessionInner {
-    pub(crate) session_id: String,
+    #[serde(skip)]
+    pub(crate) id: String,
+    pub(crate) data: HashMap<String, String>,
+    #[serde(skip)]
     pub(crate) status: SessionStatus,
-    pub(crate) data: HashMap<String,String>,
 }
 
+impl Default for SessionInner {
+    fn default() -> Self {
+        SessionInner {
+            id: Uuid::now_v7().to_string(),
+            data: HashMap::new(),
+            status: SessionStatus::UnChange,
+        }
+    }
+}
 
 impl SessionInner {
-    pub(crate) fn new(session_id: String) -> Self {
-        SessionInner {
-            session_id,
-            status: SessionStatus::UnChange,
-            data: HashMap::new(),
+    pub fn new(id: String) -> Self {
+        let mut this = SessionInner::default();
+        this.id = id;
+        this.status = Change;
+        this
+    }
+    pub fn get<T: DeserializeOwned>(&self, key: &str) -> Option<T> {
+        self.data.get(key)
+            .and_then(|s| serde_json::from_str::<T>(s).ok())
+    }
+    pub fn set<T: Serialize>(&mut self, key: &str, value: T) -> Result<(), io::Error>{
+        if let Ok(s) = serde_json::to_string(&value) {
+            self.data.insert(key.to_string(), s);
+            self.status = Change;
+            Ok(())
+        } else {
+            Err(io::Error::new(io::ErrorKind::Other, "serde_json::to_string failed"))
         }
     }
-    pub fn session_id(&self) -> String {
-        self.session_id.clone()
+    pub fn remove(&mut self, key: &str) {
+        self.data.remove(key);
+        self.status = Change;
     }
-   
-    pub(crate) fn builder(&self, config: &Rc<SessionBuilder>) -> Cookie {
-        let mut cookie = Cookie::new(config.key.clone(), self.session_id.clone());
-        cookie.set_path(config.path.clone());
-        cookie.set_domain(config.domain.clone());
-        cookie.set_secure(config.secure);
-        cookie.set_http_only(config.http_only);
-        cookie.set_max_age(config.max_age);
-        if let Some(x) = config.same_site {
-            cookie.set_same_site(x);
-        }
-        cookie.set_expires(time::OffsetDateTime::now_utc() + config.expire_time);
-        cookie
+    pub fn clear(&mut self) {
+        self.data.clear();
+        self.status = SessionStatus::Clear;
+    }
+    pub fn len(&self) -> usize {
+        self.data.len()
     }
 }
-
-
-impl Session {
-    pub fn get<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>, std::io::Error> {
-        Ok(
-            match self.0.borrow_mut().data.get(key) {
-                Some(x) => {
-                    Some(
-                        serde_json::from_slice(x.as_bytes()).map_err(|x|{
-                            std::io::Error::new(
-                                std::io::ErrorKind::Other,
-                                x
-                            )
-                        })?
-                    )
-                },
-                None => None
-            }
-        )
-    }
-    pub fn set<T: serde::Serialize>(&self, key: &str, value: T) -> Result<(), std::io::Error> {
-        self.0.borrow_mut().status = SessionStatus::Change;
-        self.0.borrow_mut().data.insert(
-            key.to_string(),
-            serde_json::to_string(&value).map_err(|x|{
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    x
-                )
-            })?
-        );
-        Ok(())
-    }
-    pub fn remove(&self, key: &str) -> Result<(), std::io::Error> {
-        self.0.borrow_mut().status = SessionStatus::Change;
-        self.0.borrow_mut().data.remove(key);
-        Ok(())
-    }
-    pub fn clear(&self) -> Result<(), std::io::Error> {
-        self.0.borrow_mut().status = SessionStatus::Clear;
-        self.0.borrow_mut().data.clear();
-        Ok(())
-    }
-    pub fn destroy(&self) -> Result<(), std::io::Error> {
-        self.0.borrow_mut().status = SessionStatus::Destroy;
-        Ok(())
-    }
-}
-

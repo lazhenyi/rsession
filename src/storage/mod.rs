@@ -1,12 +1,14 @@
-use std::collections::HashMap;
+use async_trait::async_trait;
 use time::Duration;
+use crate::SessionInner;
 
+#[async_trait]
 pub trait SessionStore: Clone + Sync + Send + 'static  {
-    fn get(&self, key: &str) -> impl Future<Output = Result<HashMap<String,String>, std::io::Error>>;
-    fn set(&self, key: &str, value: HashMap<String,String>) -> impl Future<Output = Result<(), std::io::Error>>;
-    fn remove(&self, key: &str) -> impl Future<Output = Result<(), std::io::Error>>;
-    fn expire(&self, key: &str, expire_time: Duration) -> impl Future<Output = Result<(), std::io::Error>>;
-    fn clear(&self) -> impl Future<Output = Result<(), std::io::Error>>;
+    async fn get(&self, key: &str) -> Result<SessionInner, std::io::Error>;
+    async fn set(&self, key: &str, value: SessionInner) -> Result<(), std::io::Error>;
+    async fn remove(&self, key: &str) -> Result<(), std::io::Error>;
+    async  fn expire(&self, key: &str, expire_time: Duration) -> Result<(), std::io::Error>;
+    async fn clear(&self) -> Result<(), std::io::Error>;
 }
 
 
