@@ -19,7 +19,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rsession = "0.1.0"
+rsession = "0.2.1"
 ```
 
 ### Feature Flags
@@ -28,7 +28,7 @@ Enable specific features based on your needs:
 
 ```toml
 [dependencies.rsession]
-version = "0.1.0"
+version = "0.2.1"
 features = [
     "redis",          # Redis storage backend
     "redis-cluster",  # Redis Cluster support
