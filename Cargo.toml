@@ -46,7 +46,7 @@ async-trait = "0.1.88"
 salvo = { version = "0.81.0", features = [], optional = true }
 
 [[example]]
-name = "actix-web"
+name = "actix-web-test"
 path = "test/actix.rs"
 required-features = [
     "actix-web",

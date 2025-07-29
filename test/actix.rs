@@ -1,5 +1,3 @@
-mod axum;
-
 use actix_web::{App, HttpServer};
 use rsession::framework::actix::ActixSessionMiddleware;
 use rsession::redis::RedisSessionStorage;
@@ -13,13 +11,13 @@ async fn main() {
             .create_pool(Some(deadpool_redis::Runtime::Tokio1))
             .unwrap();
         let session = rsession::SessionBuilder::default();
-        let mut store = RedisSessionStorage::new(redis, RandKey::UuidV7);
-        store.set_prefix("actix_session:");
+        let mut store = RedisSessionStorage::new(redis, RandKey::RandomSha256(128));
+        store.set_prefix("actix_test_session:");
         App::new()
             .wrap(ActixSessionMiddleware::new(session.clone(), store.clone()))
             .route("/", actix_web::web::get().to(index))
     })
-    .bind("127.0.0.1:8080")
+    .bind("127.0.0.1:3080")
     .unwrap()
     .run()
     .await

@@ -106,8 +106,8 @@ where
         Box::pin(async move {
             let session_key = req.cookie(&builder.key).map(|x| x.value().to_string());
             if let Some(session_key) = session_key {
-                store.remove(&session_key).await.ok();
                 if let Ok(inner) = store.get(&session_key).await {
+                    store.remove(&session_key).await.ok();
                     req.extensions_mut().insert(Rc::new(RefCell::new(inner)));
                 } else {
                     req.extensions_mut()
